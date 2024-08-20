@@ -21,7 +21,6 @@
 #include "osdfile.h"
 
 #include "lzma/C/7z.h"
-#include "lzma/C/7zAlloc.h"
 #include "lzma/C/7zCrc.h"
 #include "lzma/C/7zTypes.h"
 
@@ -51,16 +50,16 @@ struct CFileInStream : public ISeekInStream
 {
 	CFileInStream() noexcept
 	{
-		Read = [] (void *pp, void *buf, size_t *size) { return reinterpret_cast<CFileInStream *>(pp)->read(buf, *size); };
-		Seek = [] (void *pp, Int64 *pos, ESzSeek origin) { return reinterpret_cast<CFileInStream *>(pp)->seek(*pos, origin); };
+		Read = [] (const ISeekInStream *pp, void *buf, size_t *size) { return reinterpret_cast<const CFileInStream *>(pp)->read(pp, buf, *size); };
+		Seek = [] (const ISeekInStream *pp, int64_t *pos, ESzSeek origin) { return reinterpret_cast<const CFileInStream *>(pp)->seek(pp, *pos, origin); };
 	}
 
 	random_read::ptr    file;
-	std::uint64_t       currfpos = 0;
-	std::uint64_t       length = 0;
+	mutable std::uint64_t       currfpos = 0;
+	mutable std::uint64_t       length = 0;
 
 private:
-	SRes read(void *data, std::size_t &size) noexcept
+	SRes read(const ISeekInStream *pp, void *data, std::size_t &size) const noexcept
 	{
 		if (!file)
 		{
@@ -79,7 +78,7 @@ private:
 		return !err ? SZ_OK : SZ_ERROR_READ;
 	}
 
-	SRes seek(Int64 &pos, ESzSeek origin) noexcept
+	SRes seek(const ISeekInStream *pp, int64_t &pos, ESzSeek origin) const noexcept
 	{
 		// need to synthesise this because the OSD file wrapper doesn't implement SEEK_END
 		switch (origin)
@@ -225,19 +224,19 @@ private:
 	std::chrono::system_clock::time_point   m_curr_modified;        // current file modification time
 	std::uint32_t                           m_curr_crc;             // current file crc
 
-	std::vector<UInt16>                     m_utf16_buf;
+	std::vector<uint16_t>                   m_utf16_buf;
 	std::vector<char32_t>                   m_uchar_buf;
 	std::vector<char>                       m_utf8_buf;
 
 	CFileInStream                           m_archive_stream;
-	CLookToRead                             m_look_stream;
+	CLookToRead2                            m_look_stream;
 	CSzArEx                                 m_db;
 	ISzAlloc                                m_alloc_imp;
 	ISzAlloc                                m_alloc_temp_imp;
 	bool                                    m_inited;
 
 	// cached stuff for solid blocks
-	UInt32                                  m_block_index;
+	uint32_t                                m_block_index;
 	Byte *                                  m_out_buffer;
 	std::size_t                             m_out_buffer_size;
 };
@@ -308,15 +307,15 @@ m7z_file_impl::m7z_file_impl(std::string &&filename) noexcept
 	, m_out_buffer(nullptr)
 	, m_out_buffer_size(0)
 {
-	m_alloc_imp.Alloc = &SzAlloc;
-	m_alloc_imp.Free = &SzFree;
+	m_alloc_imp.Alloc = [] (ISzAllocPtr p, size_t size) { return malloc(size); };
+	m_alloc_imp.Free = [] (ISzAllocPtr p, void *address) { return free(address); };
 
-	m_alloc_temp_imp.Alloc = &SzAllocTemp;
-	m_alloc_temp_imp.Free = &SzFreeTemp;
+	m_alloc_temp_imp.Alloc = [] (ISzAllocPtr p, size_t size) { return malloc(size); };
+	m_alloc_temp_imp.Free = [] (ISzAllocPtr p, void *address) { return free(address); };
 
-	LookToRead_CreateVTable(&m_look_stream, False);
+	LookToRead2_CreateVTable(&m_look_stream, False);
 	m_look_stream.realStream = &m_archive_stream;
-	LookToRead_Init(&m_look_stream);
+	m_look_stream.pos = m_look_stream.size = 0;
 }
 
 
@@ -362,7 +361,7 @@ std::error_condition m7z_file_impl::initialize() noexcept
 
 	SzArEx_Init(&m_db);
 	m_inited = true;
-	SRes const res = SzArEx_Open(&m_db, &m_look_stream.s, &m_alloc_imp, &m_alloc_temp_imp);
+	SRes const res = SzArEx_Open(&m_db, &m_look_stream.vt, &m_alloc_imp, &m_alloc_temp_imp);
 	if (res != SZ_OK)
 	{
 		osd_printf_error("un7z: error opening %s as 7z archive (%d)\n", m_filename, int(res));
@@ -458,7 +457,7 @@ std::error_condition m7z_file_impl::decompress(void *buffer, std::size_t length)
 	std::size_t offset(0);
 	std::size_t out_size_processed(0);
 	SRes const res = SzArEx_Extract(
-			&m_db, &m_look_stream.s, m_curr_file_idx,           // requested file
+			&m_db, &m_look_stream.vt, m_curr_file_idx,          // requested file
 			&m_block_index, &m_out_buffer, &m_out_buffer_size,  // solid block caching
 			&offset, &out_size_processed,                       // data size/offset
 			&m_alloc_imp, &m_alloc_temp_imp);                   // allocator helpers

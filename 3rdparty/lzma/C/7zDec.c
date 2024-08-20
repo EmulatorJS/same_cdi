@@ -1,5 +1,5 @@
 /* 7zDec.c -- Decoding from 7z folder
-2015-11-18 : Igor Pavlov : Public domain */
+2019-02-02 : Igor Pavlov : Public domain */
 
 #include "Precomp.h"
 
@@ -39,28 +39,28 @@
 
 typedef struct
 {
-  IByteIn p;
+  IByteIn vt;
   const Byte *cur;
   const Byte *end;
   const Byte *begin;
-  UInt64 processed;
-  Bool extra;
+  uint64_t processed;
+  BoolInt extra;
   SRes res;
-  ILookInStream *inStream;
+  const ILookInStream *inStream;
 } CByteInToLook;
 
-static Byte ReadByte(void *pp)
+static Byte ReadByte(const IByteIn *pp)
 {
-  CByteInToLook *p = (CByteInToLook *)pp;
+  CByteInToLook *p = CONTAINER_FROM_VTBL(pp, CByteInToLook, vt);
   if (p->cur != p->end)
     return *p->cur++;
   if (p->res == SZ_OK)
   {
     size_t size = p->cur - p->begin;
     p->processed += size;
-    p->res = p->inStream->Skip(p->inStream, size);
+    p->res = ILookInStream_Skip(p->inStream, size);
     size = (1 << 25);
-    p->res = p->inStream->Look(p->inStream, (const void **)&p->begin, &size);
+    p->res = ILookInStream_Look(p->inStream, (const void **)&p->begin, &size);
     p->cur = p->begin;
     p->end = p->begin + size;
     if (size != 0)
@@ -70,14 +70,14 @@ static Byte ReadByte(void *pp)
   return 0;
 }
 
-static SRes SzDecodePpmd(const Byte *props, unsigned propsSize, UInt64 inSize, ILookInStream *inStream,
-    Byte *outBuffer, SizeT outSize, ISzAlloc *allocMain)
+static SRes SzDecodePpmd(const Byte *props, unsigned propsSize, uint64_t inSize, const ILookInStream *inStream,
+    Byte *outBuffer, SizeT outSize, ISzAllocPtr allocMain)
 {
   CPpmd7 ppmd;
   CByteInToLook s;
   SRes res = SZ_OK;
 
-  s.p.Read = ReadByte;
+  s.vt.Read = ReadByte;
   s.inStream = inStream;
   s.begin = s.end = s.cur = NULL;
   s.extra = False;
@@ -89,7 +89,7 @@ static SRes SzDecodePpmd(const Byte *props, unsigned propsSize, UInt64 inSize, I
 
   {
     unsigned order = props[0];
-    UInt32 memSize = GetUi32(props + 1);
+    uint32_t memSize = GetUi32(props + 1);
     if (order < PPMD7_MIN_ORDER ||
         order > PPMD7_MAX_ORDER ||
         memSize < PPMD7_MIN_MEM_SIZE ||
@@ -103,7 +103,7 @@ static SRes SzDecodePpmd(const Byte *props, unsigned propsSize, UInt64 inSize, I
   {
     CPpmd7z_RangeDec rc;
     Ppmd7z_RangeDec_CreateVTable(&rc);
-    rc.Stream = &s.p;
+    rc.Stream = &s.vt;
     if (!Ppmd7z_RangeDec_Init(&rc))
       res = SZ_ERROR_DATA;
     else if (s.extra)
@@ -113,7 +113,7 @@ static SRes SzDecodePpmd(const Byte *props, unsigned propsSize, UInt64 inSize, I
       SizeT i;
       for (i = 0; i < outSize; i++)
       {
-        int sym = Ppmd7_DecodeSymbol(&ppmd, &rc.p);
+        int sym = Ppmd7_DecodeSymbol(&ppmd, &rc.vt);
         if (s.extra || sym < 0)
           break;
         outBuffer[i] = (Byte)sym;
@@ -131,8 +131,8 @@ static SRes SzDecodePpmd(const Byte *props, unsigned propsSize, UInt64 inSize, I
 #endif
 
 
-static SRes SzDecodeLzma(const Byte *props, unsigned propsSize, UInt64 inSize, ILookInStream *inStream,
-    Byte *outBuffer, SizeT outSize, ISzAlloc *allocMain)
+static SRes SzDecodeLzma(const Byte *props, unsigned propsSize, uint64_t inSize, ILookInStream *inStream,
+    Byte *outBuffer, SizeT outSize, ISzAllocPtr allocMain)
 {
   CLzmaDec state;
   SRes res = SZ_OK;
@@ -149,14 +149,14 @@ static SRes SzDecodeLzma(const Byte *props, unsigned propsSize, UInt64 inSize, I
     size_t lookahead = (1 << 18);
     if (lookahead > inSize)
       lookahead = (size_t)inSize;
-    res = inStream->Look(inStream, &inBuf, &lookahead);
+    res = ILookInStream_Look(inStream, &inBuf, &lookahead);
     if (res != SZ_OK)
       break;
 
     {
       SizeT inProcessed = (SizeT)lookahead, dicPos = state.dicPos;
       ELzmaStatus status;
-      res = LzmaDec_DecodeToDic(&state, outSize, inBuf, &inProcessed, LZMA_FINISH_END, &status);
+      res = LzmaDec_DecodeToDic(&state, outSize, (const Byte *)inBuf, &inProcessed, LZMA_FINISH_END, &status);
       lookahead -= inProcessed;
       inSize -= inProcessed;
       if (res != SZ_OK)
@@ -178,7 +178,7 @@ static SRes SzDecodeLzma(const Byte *props, unsigned propsSize, UInt64 inSize, I
         break;
       }
 
-      res = inStream->Skip((void *)inStream, inProcessed);
+      res = ILookInStream_Skip(inStream, inProcessed);
       if (res != SZ_OK)
         break;
     }
@@ -191,8 +191,8 @@ static SRes SzDecodeLzma(const Byte *props, unsigned propsSize, UInt64 inSize, I
 
 #ifndef _7Z_NO_METHOD_LZMA2
 
-static SRes SzDecodeLzma2(const Byte *props, unsigned propsSize, UInt64 inSize, ILookInStream *inStream,
-    Byte *outBuffer, SizeT outSize, ISzAlloc *allocMain)
+static SRes SzDecodeLzma2(const Byte *props, unsigned propsSize, uint64_t inSize, ILookInStream *inStream,
+    Byte *outBuffer, SizeT outSize, ISzAllocPtr allocMain)
 {
   CLzma2Dec state;
   SRes res = SZ_OK;
@@ -211,14 +211,14 @@ static SRes SzDecodeLzma2(const Byte *props, unsigned propsSize, UInt64 inSize, 
     size_t lookahead = (1 << 18);
     if (lookahead > inSize)
       lookahead = (size_t)inSize;
-    res = inStream->Look(inStream, &inBuf, &lookahead);
+    res = ILookInStream_Look(inStream, &inBuf, &lookahead);
     if (res != SZ_OK)
       break;
 
     {
       SizeT inProcessed = (SizeT)lookahead, dicPos = state.decoder.dicPos;
       ELzmaStatus status;
-      res = Lzma2Dec_DecodeToDic(&state, outSize, inBuf, &inProcessed, LZMA_FINISH_END, &status);
+      res = Lzma2Dec_DecodeToDic(&state, outSize, (const Byte *)inBuf, &inProcessed, LZMA_FINISH_END, &status);
       lookahead -= inProcessed;
       inSize -= inProcessed;
       if (res != SZ_OK)
@@ -237,7 +237,7 @@ static SRes SzDecodeLzma2(const Byte *props, unsigned propsSize, UInt64 inSize, 
         break;
       }
 
-      res = inStream->Skip((void *)inStream, inProcessed);
+      res = ILookInStream_Skip(inStream, inProcessed);
       if (res != SZ_OK)
         break;
     }
@@ -250,7 +250,7 @@ static SRes SzDecodeLzma2(const Byte *props, unsigned propsSize, UInt64 inSize, 
 #endif
 
 
-static SRes SzDecodeCopy(UInt64 inSize, ILookInStream *inStream, Byte *outBuffer)
+static SRes SzDecodeCopy(uint64_t inSize, ILookInStream *inStream, Byte *outBuffer)
 {
   while (inSize > 0)
   {
@@ -258,18 +258,18 @@ static SRes SzDecodeCopy(UInt64 inSize, ILookInStream *inStream, Byte *outBuffer
     size_t curSize = (1 << 18);
     if (curSize > inSize)
       curSize = (size_t)inSize;
-    RINOK(inStream->Look(inStream, &inBuf, &curSize));
+    RINOK(ILookInStream_Look(inStream, &inBuf, &curSize));
     if (curSize == 0)
       return SZ_ERROR_INPUT_EOF;
     memcpy(outBuffer, inBuf, curSize);
     outBuffer += curSize;
     inSize -= curSize;
-    RINOK(inStream->Skip((void *)inStream, curSize));
+    RINOK(ILookInStream_Skip(inStream, curSize));
   }
   return SZ_OK;
 }
 
-static Bool IS_MAIN_METHOD(UInt32 m)
+static BoolInt IS_MAIN_METHOD(uint32_t m)
 {
   switch (m)
   {
@@ -286,12 +286,12 @@ static Bool IS_MAIN_METHOD(UInt32 m)
   return False;
 }
 
-static Bool IS_SUPPORTED_CODER(const CSzCoderInfo *c)
+static BoolInt IS_SUPPORTED_CODER(const CSzCoderInfo *c)
 {
   return
       c->NumStreams == 1
-      /* && c->MethodID <= (UInt32)0xFFFFFFFF */
-      && IS_MAIN_METHOD((UInt32)c->MethodID);
+      /* && c->MethodID <= (uint32_t)0xFFFFFFFF */
+      && IS_MAIN_METHOD((uint32_t)c->MethodID);
 }
 
 #define IS_BCJ2(c) ((c)->MethodID == k_BCJ2 && (c)->NumStreams == 4)
@@ -316,7 +316,7 @@ static SRes CheckSupportedFolder(const CSzFolder *f)
   {
     const CSzCoderInfo *c = &f->Coders[1];
     if (
-        /* c->MethodID > (UInt32)0xFFFFFFFF || */
+        /* c->MethodID > (uint32_t)0xFFFFFFFF || */
         c->NumStreams != 1
         || f->NumPackStreams != 1
         || f->PackStreams[0] != 0
@@ -324,7 +324,7 @@ static SRes CheckSupportedFolder(const CSzFolder *f)
         || f->Bonds[0].InIndex != 1
         || f->Bonds[0].OutIndex != 0)
       return SZ_ERROR_UNSUPPORTED;
-    switch ((UInt32)c->MethodID)
+    switch ((uint32_t)c->MethodID)
     {
       case k_Delta:
       case k_BCJ:
@@ -369,13 +369,13 @@ static SRes CheckSupportedFolder(const CSzFolder *f)
 
 static SRes SzFolder_Decode2(const CSzFolder *folder,
     const Byte *propsData,
-    const UInt64 *unpackSizes,
-    const UInt64 *packPositions,
-    ILookInStream *inStream, UInt64 startPos,
-    Byte *outBuffer, SizeT outSize, ISzAlloc *allocMain,
+    const uint64_t *unpackSizes,
+    const uint64_t *packPositions,
+    ILookInStream *inStream, uint64_t startPos,
+    Byte *outBuffer, SizeT outSize, ISzAllocPtr allocMain,
     Byte *tempBuf[])
 {
-  UInt32 ci;
+  uint32_t ci;
   SizeT tempSizes[3] = { 0, 0, 0};
   SizeT tempSize3 = 0;
   Byte *tempBuf3 = 0;
@@ -386,17 +386,17 @@ static SRes SzFolder_Decode2(const CSzFolder *folder,
   {
     const CSzCoderInfo *coder = &folder->Coders[ci];
 
-    if (IS_MAIN_METHOD((UInt32)coder->MethodID))
+    if (IS_MAIN_METHOD((uint32_t)coder->MethodID))
     {
-      UInt32 si = 0;
-      UInt64 offset;
-      UInt64 inSize;
+      uint32_t si = 0;
+      uint64_t offset;
+      uint64_t inSize;
       Byte *outBufCur = outBuffer;
       SizeT outSizeCur = outSize;
       if (folder->NumCoders == 4)
       {
-        UInt32 indices[] = { 3, 2, 0 };
-        UInt64 unpackSize = unpackSizes[ci];
+        uint32_t indices[] = { 3, 2, 0 };
+        uint64_t unpackSize = unpackSizes[ci];
         si = indices[ci];
         if (ci < 2)
         {
@@ -404,7 +404,7 @@ static SRes SzFolder_Decode2(const CSzFolder *folder,
           outSizeCur = (SizeT)unpackSize;
           if (outSizeCur != unpackSize)
             return SZ_ERROR_MEM;
-          temp = (Byte *)IAlloc_Alloc(allocMain, outSizeCur);
+          temp = (Byte *)ISzAlloc_Alloc(allocMain, outSizeCur);
           if (!temp && outSizeCur != 0)
             return SZ_ERROR_MEM;
           outBufCur = tempBuf[1 - ci] = temp;
@@ -421,7 +421,7 @@ static SRes SzFolder_Decode2(const CSzFolder *folder,
           return SZ_ERROR_UNSUPPORTED;
       }
       offset = packPositions[si];
-      inSize = packPositions[si + 1] - offset;
+      inSize = packPositions[(size_t)si + 1] - offset;
       RINOK(LookInStream_SeekTo(inStream, startPos + offset));
 
       if (coder->MethodID == k_Copy)
@@ -451,8 +451,8 @@ static SRes SzFolder_Decode2(const CSzFolder *folder,
     }
     else if (coder->MethodID == k_BCJ2)
     {
-      UInt64 offset = packPositions[1];
-      UInt64 s3Size = packPositions[2] - offset;
+      uint64_t offset = packPositions[1];
+      uint64_t s3Size = packPositions[2] - offset;
       
       if (ci != 3)
         return SZ_ERROR_UNSUPPORTED;
@@ -460,7 +460,7 @@ static SRes SzFolder_Decode2(const CSzFolder *folder,
       tempSizes[2] = (SizeT)s3Size;
       if (tempSizes[2] != s3Size)
         return SZ_ERROR_MEM;
-      tempBuf[2] = (Byte *)IAlloc_Alloc(allocMain, tempSizes[2]);
+      tempBuf[2] = (Byte *)ISzAlloc_Alloc(allocMain, tempSizes[2]);
       if (!tempBuf[2] && tempSizes[2] != 0)
         return SZ_ERROR_MEM;
       
@@ -522,7 +522,7 @@ static SRes SzFolder_Decode2(const CSzFolder *folder,
         {
           case k_BCJ:
           {
-            UInt32 state;
+            uint32_t state;
             x86_Convert_Init(state);
             x86_Convert(outBuffer, outSize, 0, &state, 0);
             break;
@@ -546,10 +546,10 @@ static SRes SzFolder_Decode2(const CSzFolder *folder,
 }
 
 
-SRes SzAr_DecodeFolder(const CSzAr *p, UInt32 folderIndex,
-    ILookInStream *inStream, UInt64 startPos,
+SRes SzAr_DecodeFolder(const CSzAr *p, uint32_t folderIndex,
+    ILookInStream *inStream, uint64_t startPos,
     Byte *outBuffer, size_t outSize,
-    ISzAlloc *allocMain)
+    ISzAllocPtr allocMain)
 {
   SRes res;
   CSzFolder folder;
@@ -557,7 +557,7 @@ SRes SzAr_DecodeFolder(const CSzAr *p, UInt32 folderIndex,
   
   const Byte *data = p->CodersData + p->FoCodersOffsets[folderIndex];
   sd.Data = data;
-  sd.Size = p->FoCodersOffsets[folderIndex + 1] - p->FoCodersOffsets[folderIndex];
+  sd.Size = p->FoCodersOffsets[(size_t)folderIndex + 1] - p->FoCodersOffsets[folderIndex];
   
   res = SzGetNextFolderItem(&folder, &sd);
   
@@ -579,7 +579,7 @@ SRes SzAr_DecodeFolder(const CSzAr *p, UInt32 folderIndex,
         outBuffer, (SizeT)outSize, allocMain, tempBuf);
     
     for (i = 0; i < 3; i++)
-      IAlloc_Free(allocMain, tempBuf[i]);
+      ISzAlloc_Free(allocMain, tempBuf[i]);
 
     if (res == SZ_OK)
       if (SzBitWithVals_Check(&p->FolderCRCs, folderIndex))
