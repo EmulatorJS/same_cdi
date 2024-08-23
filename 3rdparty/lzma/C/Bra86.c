@@ -1,5 +1,5 @@
 /* Bra86.c -- Converter for x86 code (BCJ)
-2013-11-12 : Igor Pavlov : Public domain */
+2017-04-03 : Igor Pavlov : Public domain */
 
 #include "Precomp.h"
 
@@ -7,10 +7,10 @@
 
 #define Test86MSByte(b) ((((b) + 1) & 0xFE) == 0)
 
-SizeT x86_Convert(Byte *data, SizeT size, UInt32 ip, UInt32 *state, int encoding)
+SizeT x86_Convert(Byte *data, SizeT size, uint32_t ip, uint32_t *state, int encoding)
 {
   SizeT pos = 0;
-  UInt32 mask = *state & 7;
+  uint32_t mask = *state & 7;
   if (size < 5)
     return 0;
   size -= 4;
@@ -37,7 +37,7 @@ SizeT x86_Convert(Byte *data, SizeT size, UInt32 ip, UInt32 *state, int encoding
       else
       {
         mask >>= (unsigned)d;
-        if (mask != 0 && (mask > 4 || mask == 3 || Test86MSByte(p[(mask >> 1) + 1])))
+        if (mask != 0 && (mask > 4 || mask == 3 || Test86MSByte(p[(size_t)(mask >> 1) + 1])))
         {
           mask = (mask >> 1) | 4;
           pos++;
@@ -48,8 +48,8 @@ SizeT x86_Convert(Byte *data, SizeT size, UInt32 ip, UInt32 *state, int encoding
 
     if (Test86MSByte(p[4]))
     {
-      UInt32 v = ((UInt32)p[4] << 24) | ((UInt32)p[3] << 16) | ((UInt32)p[2] << 8) | ((UInt32)p[1]);
-      UInt32 cur = ip + (UInt32)pos;
+      uint32_t v = ((uint32_t)p[4] << 24) | ((uint32_t)p[3] << 16) | ((uint32_t)p[2] << 8) | ((uint32_t)p[1]);
+      uint32_t cur = ip + (uint32_t)pos;
       pos += 5;
       if (encoding)
         v += cur;
@@ -60,7 +60,7 @@ SizeT x86_Convert(Byte *data, SizeT size, UInt32 ip, UInt32 *state, int encoding
         unsigned sh = (mask & 6) << 2;
         if (Test86MSByte((Byte)(v >> sh)))
         {
-          v ^= (((UInt32)0x100 << sh) - 1);
+          v ^= (((uint32_t)0x100 << sh) - 1);
           if (encoding)
             v += cur;
           else

@@ -150,8 +150,12 @@ end
 		"softfloat",
 		"softfloat3",
 		ext_lib("jpeg"),
-		"7z",
 	}
+if _OPTIONS["targetos"]~="asmjs" then
+		links {
+			"7z",
+		}
+end
 if not _OPTIONS["FORCE_DRC_C_BACKEND"] then
 	links {
 		"asmjit",

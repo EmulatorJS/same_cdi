@@ -114,11 +114,11 @@ public:
 
 private:
 	// internal helpers
-	static void *fast_alloc(void *p, size_t size);
-	static void fast_free(void *p, void *address);
+	static void *fast_alloc(ISzAllocPtr p, size_t size);
+	static void fast_free(ISzAllocPtr p, void *address);
 
 	static constexpr int MAX_LZMA_ALLOCS = 64;
-	uint32_t *                m_allocptr[MAX_LZMA_ALLOCS];
+	mutable uint32_t *                m_allocptr[MAX_LZMA_ALLOCS];
 };
 
 
@@ -1020,9 +1020,9 @@ chd_lzma_allocator::~chd_lzma_allocator()
 //  allocates and frees memory frequently
 //-------------------------------------------------
 
-void *chd_lzma_allocator::fast_alloc(void *p, size_t size)
+void *chd_lzma_allocator::fast_alloc(ISzAllocPtr p, size_t size)
 {
-	auto *codec = reinterpret_cast<chd_lzma_allocator *>(p);
+	auto *codec = reinterpret_cast<const chd_lzma_allocator *>(p);
 
 	// compute the size, rounding to the nearest 1k
 	size = (size + 0x3ff) & ~0x3ff;
@@ -1059,12 +1059,12 @@ void *chd_lzma_allocator::fast_alloc(void *p, size_t size)
 //  allocates and frees memory frequently
 //-------------------------------------------------
 
-void chd_lzma_allocator::fast_free(void *p, void *address)
+void chd_lzma_allocator::fast_free(ISzAllocPtr p, void *address)
 {
 	if (address == nullptr)
 		return;
 
-	auto *codec = reinterpret_cast<chd_lzma_allocator *>(p);
+	auto *codec = reinterpret_cast<const chd_lzma_allocator *>(p);
 
 	// find the hunk
 	uint32_t *ptr = reinterpret_cast<uint32_t *>(address) - 1;
