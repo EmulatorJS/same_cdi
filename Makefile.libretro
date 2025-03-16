@@ -234,6 +234,7 @@ build:
 	@mv $(SUBTARGET)_libretro.so $(SAME_SYSTEM)_libretro.so 2> /dev/null || true
 	@mv $(SUBTARGET)_libretro_android.so $(SAME_SYSTEM)_libretro_android.so 2> /dev/null || true
 	$(AR) -crs $(SAME_SYSTEM)_libretro_emscripten.bc $(SUBTARGET)_libretro_emscripten.bc 2> /dev/null || true
+	@rm -rf $(SUBTARGET)_libretro_emscripten.bc
 	@echo "Done!"
 
 vs2015:
